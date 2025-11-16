@@ -1,0 +1,7 @@
+﻿# ignore large generated & dataset files
+data/HR/
+data/processed/
+models/
+outputs/
+*.pth
+*.pt
