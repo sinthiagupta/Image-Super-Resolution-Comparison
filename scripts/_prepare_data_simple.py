@@ -36,8 +36,11 @@ def convert_hr_to_lr():
 
         img = Image.open(hr_path).convert("RGB")     # simple preprocess
         w, h = img.size
-        img_lr = img.resize((w//SCALE, h//SCALE), Image.BICUBIC)
-        img_lr.save(lr_path)
+        # 1. Downscale (small LR)
+        lr_small = img.resize((w//SCALE, h//SCALE), Image.BICUBIC)
+        # 2. Upscale back to original HR size (blurry LR)
+        lr = lr_small.resize((w, h), Image.BICUBIC)
+        lr.save(lr_path)
 
     print("LR images saved in data/LR")
 
