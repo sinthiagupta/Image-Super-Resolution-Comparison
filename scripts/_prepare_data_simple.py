@@ -1,77 +1,132 @@
-# scripts/1_prepare_simple.py
-# Very simple: HR → LR + simple preprocessing + split
+# scripts/preprocess_fixed_first80_81_90.py
+"""
+Deterministic preprocess:
+ - read HR images from data/HR/ (sorted order)
+ - create blurry LR images in data/LR/ (HR -> downscale -> upscale)
+ - split by fixed indices:
+     train = first 80 images (indices 0..79)
+     val   = next 10 images  (indices 80..89)
+     test  = next 10 images  (indices 90..99)
+   (if fewer than 100 images, uses available counts)
+ - copy paired HR and LR into data/processed/{train,val,test}/{HR,LR}
 
+Run:
+    python scripts/preprocess_fixed_first80_81_90.py
+"""
 import os
 from PIL import Image
-import random
 from shutil import copyfile
 
-# FOLDERS
-ROOT = os.path.dirname(os.path.dirname(__file__))    # repo folder
+# -------------- SETTINGS --------------
+SCALE = 4                    # downscale factor for LR creation
+TRAIN_END = 80               # first 80 -> train (indices 0..79)
+VAL_END = 90                 # 81..90 -> val (indices 80..89), test starts at 90
+# --------------------------------------
+
+ROOT = os.path.dirname(os.path.dirname(__file__))
 HR_FOLDER = os.path.join(ROOT, "data", "HR")
-LR_FOLDER = os.path.join(ROOT, "data", "LR")         # temporary LR output
+LR_FOLDER = os.path.join(ROOT, "data", "LR")              # intermediate LR images
 PROC_FOLDER = os.path.join(ROOT, "data", "processed")
 
-# SETTINGS
-SCALE = 4   # HR → LR scale
-TRAIN_RATIO = 0.8
-VAL_RATIO = 0.1
-TEST_RATIO = 0.1
+# helper to list image files (sorted)
+def list_images(folder):
+    if not os.path.isdir(folder):
+        return []
+    exts = (".png", ".jpg", ".jpeg", ".bmp", ".tiff")
+    return sorted([f for f in os.listdir(folder) if f.lower().endswith(exts)])
 
+# create required folders
 def make_dirs():
     os.makedirs(LR_FOLDER, exist_ok=True)
-    for split in ["train", "val", "test"]:
+    for split in ("train","val","test"):
+        os.makedirs(os.path.join(PROC_FOLDER, split, "HR"), exist_ok=True)
         os.makedirs(os.path.join(PROC_FOLDER, split, "LR"), exist_ok=True)
 
-def convert_hr_to_lr():
-    print("Converting HR → LR ...")
-    files = sorted(os.listdir(HR_FOLDER))
+# create blurry LR files for each HR (same base name + _lr.png)
+def create_blurry_lr_files(hr_files):
+    if not hr_files:
+        raise SystemExit(f"No HR images found in {HR_FOLDER}. Put your HR images there and run again.")
+    print(f"Creating blurry LR images for {len(hr_files)} HR files (saved to {LR_FOLDER}) ...")
+    for fname in hr_files:
+        src = os.path.join(HR_FOLDER, fname)
+        base, _ext = os.path.splitext(fname)
+        dst = os.path.join(LR_FOLDER, base + "_lr.png")
+        try:
+            img = Image.open(src).convert("RGB")
+            w, h = img.size
+            small = img.resize((max(1, w//SCALE), max(1, h//SCALE)), Image.BICUBIC)
+            lr = small.resize((w, h), Image.BICUBIC)
+            lr.save(dst, format="PNG")
+        except Exception as e:
+            print(f"  Skipped {fname}: {e}")
 
-    for f in files:
-        if not f.lower().endswith((".png", ".jpg", ".jpeg")):
-            continue
-        
-        hr_path = os.path.join(HR_FOLDER, f)
-        lr_path = os.path.join(LR_FOLDER, f.replace(".png", "_lr.png"))
+# deterministic fixed split and copy pairs
+def fixed_split_copy(hr_files):
+    # ensure LR files exist (we only use HR list order)
+    lr_files = [os.path.splitext(f)[0] + "_lr.png" for f in hr_files]
+    n = min(len(hr_files), len(lr_files))
+    if n == 0:
+        raise SystemExit("No files to process after checking HR/LR lists.")
 
-        img = Image.open(hr_path).convert("RGB")     # simple preprocess
-        w, h = img.size
-        # 1. Downscale (small LR)
-        lr_small = img.resize((w//SCALE, h//SCALE), Image.BICUBIC)
-        # 2. Upscale back to original HR size (blurry LR)
-        lr = lr_small.resize((w, h), Image.BICUBIC)
-        lr.save(lr_path)
+    print(f"\nUsing first {n} files for splitting (master = HR list).")
 
-    print("LR images saved in data/LR")
+    for idx in range(n):
+        if idx < TRAIN_END:
+            split = "train"
+        elif idx < VAL_END:
+            split = "val"
+        else:
+            split = "test"
 
-def split_data():
-    print("Splitting dataset...")
-    lr_files = sorted(os.listdir(LR_FOLDER))
-    random.shuffle(lr_files)
+        hr_name = hr_files[idx]
+        lr_name = lr_files[idx]
 
-    n = len(lr_files)
-    n_train = int(n * TRAIN_RATIO)
-    n_val = int(n * VAL_RATIO)
-    n_test = n - n_train - n_val
+        src_hr = os.path.join(HR_FOLDER, hr_name)
+        src_lr = os.path.join(LR_FOLDER, lr_name)
+        dst_hr = os.path.join(PROC_FOLDER, split, "HR", hr_name)
+        dst_lr = os.path.join(PROC_FOLDER, split, "LR", lr_name)
 
-    splits = {
-        "train": lr_files[:n_train],
-        "val": lr_files[n_train:n_train+n_val],
-        "test": lr_files[n_train+n_val:],
-    }
+        try:
+            copyfile(src_hr, dst_hr)
+            copyfile(src_lr, dst_lr)
+            # print one line per 10 copies to reduce noise (optional)
+            if (idx + 1) % 10 == 0 or idx < 5:
+                print(f"[{split}] idx {idx+1}: copied HR->{hr_name}  LR->{lr_name}")
+        except Exception as e:
+            print(f"  Failed to copy index {idx+1} ({hr_name}, {lr_name}): {e}")
 
-    for split, flist in splits.items():
-        for f in flist:
-            src = os.path.join(LR_FOLDER, f)
-            dst = os.path.join(PROC_FOLDER, split, "LR", f)
-            copyfile(src, dst)
+    # final counts
+    def count(folder):
+        if not os.path.isdir(folder):
+            return 0
+        exts = (".png",".jpg",".jpeg",".bmp",".tiff")
+        return len([f for f in os.listdir(folder) if f.lower().endswith(exts)])
 
-    print("Done! LR dataset split into train/val/test.")
+    print("\nSPLIT SUMMARY (processed):")
+    for s in ("train","val","test"):
+        c_hr = count(os.path.join(PROC_FOLDER, s, "HR"))
+        c_lr = count(os.path.join(PROC_FOLDER, s, "LR"))
+        print(f"  {s}: HR={c_hr}  LR={c_lr}")
 
 def main():
     make_dirs()
-    convert_hr_to_lr()
-    split_data()
+
+    hr_files = list_images(HR_FOLDER)
+    if not hr_files:
+        raise SystemExit(f"No HR images found in {HR_FOLDER} — please add them and retry.")
+
+    # create LR images for each HR file
+    create_blurry_lr_files(hr_files)
+
+    # copy into fixed splits using HR list order
+    fixed_split_copy(hr_files)
+
+    print("\nDone.")
+    print("Check these folders:")
+    print(" - intermediate LR:", LR_FOLDER)
+    print(" - processed/train/HR and processed/train/LR")
+    print(" - processed/val/HR and processed/val/LR")
+    print(" - processed/test/HR and processed/test/LR")
 
 if __name__ == "__main__":
     main()
