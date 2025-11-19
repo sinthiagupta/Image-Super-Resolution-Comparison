@@ -1,17 +1,14 @@
-# scripts/train_srcnn_now.py
+# scripts/_train_srcnn.py
 """
-Train residual SRCNN on existing processed dataset and save inference outputs for the VAL set.
-Assumes:
-  data/processed/train/LR, data/processed/train/HR
-  data/processed/val/LR,   data/processed/val/HR
-Outputs saved to outputs/images/val_XXX_pred.png (and lr/hr).
+Train residual SRCNN on existing processed dataset and save inference outputs for the TEST set.
+This version fixes LR->HR filename mismatches (e.g. LR names like "0091_lr.png" vs HR "0091.png")
 """
 
-import os, random
+import os, random, sys
 import numpy as np
 from PIL import Image
 
-# robust keras import (works with tensorflow.keras or standalone keras)
+# robust keras import
 try:
     import keras
     from keras import layers, models, optimizers
@@ -20,10 +17,10 @@ except Exception:
     from tensorflow.keras import layers, models, optimizers
 
 # ---------------- CONFIG ----------------
-PATCH = 64              # patch size used to train (patches come from full-size images)
+PATCH = 64
 EPOCHS = 4
 BATCH = 20
-STEPS_PER_EPOCH = 120   # lower if your CPU is slow (e.g. 50)
+STEPS_PER_EPOCH = 120
 VAL_STEPS = 40
 LEARNING_RATE = 1e-4
 
@@ -31,6 +28,9 @@ TRAIN_LR_DIR = "data/processed/train/LR"
 TRAIN_HR_DIR = "data/processed/train/HR"
 VAL_LR_DIR   = "data/processed/val/LR"
 VAL_HR_DIR   = "data/processed/val/HR"
+
+TEST_LR_DIR  = "data/processed/test/LR"
+TEST_HR_DIR  = "data/processed/test/HR"
 
 MODEL_PATH = "models/srcnn_res_trained.h5"
 OUT_DIR = "outputs/images"
@@ -49,7 +49,6 @@ def sample_patch_pair(lr_path, hr_path, patch_size):
     hr = Image.open(hr_path).convert("RGB")
     w, h = lr.size
     if w < patch_size or h < patch_size:
-        # pad/resize minimally so patch is possible
         lr = lr.resize((max(w,patch_size), max(h,patch_size)), Image.BICUBIC)
         hr = hr.resize((max(w,patch_size), max(h,patch_size)), Image.BICUBIC)
         w, h = lr.size
@@ -115,6 +114,70 @@ def tile_predict_full(model, lr_img, patch, overlap):
     out = np.clip(out, 0.0, 1.0)
     return (out * 255.0).astype(np.uint8)
 
+# ---------- robust LR->HR matching ----------
+def normalize_name(name):
+    """
+    Normalize a filename by removing common LR suffixes and extension,
+    and also removing leading zeros for loose matching.
+    """
+    base = os.path.splitext(name)[0]
+    # drop common suffixes
+    for suf in ("_lr","-lr","_LR","-LR","_small","-small","_bicubic","_nearest","_pred","_hr"):
+        if base.endswith(suf):
+            base = base[: -len(suf)]
+            break
+    # strip leading zeros to be forgiving
+    stripped = base.lstrip("0")
+    if stripped == "":
+        stripped = base  # if name was "000" keep original
+    return base, stripped
+
+def find_matching_hr(lr_name, hr_list):
+    """
+    Try multiple matching strategies to find hr filename for a given lr_name:
+      1) exact same filename in hr_list
+      2) remove common suffixes (0091_lr -> 0091) and try with common extensions
+      3) match by base (strip prefixes/leading zeros)
+      4) startswith match (relaxed)
+    Returns HR filename (from hr_list) or None.
+    """
+    # 1) exact
+    if lr_name in hr_list:
+        return lr_name
+
+    base, stripped = normalize_name(lr_name)
+
+    # 2) try base with extensions
+    for ext in (".png", ".jpg", ".jpeg"):
+        cand = base + ext
+        if cand in hr_list:
+            return cand
+        cand2 = stripped + ext
+        if cand2 in hr_list:
+            return cand2
+
+    # 3) try matching by comparing normalized stripped base of hr files
+    for h in hr_list:
+        hb = os.path.splitext(h)[0]
+        hb_norm = hb
+        # drop common suffixes from hr too
+        for suf in ("_hr","-hr","_HR","-HR"):
+            if hb_norm.endswith(suf):
+                hb_norm = hb_norm[:-len(suf)]
+                break
+        if hb_norm == base or hb_norm == stripped:
+            return h
+        if hb_norm.lstrip("0") == stripped:
+            return h
+
+    # 4) fallback: startswith (very relaxed)
+    for h in hr_list:
+        hb = os.path.splitext(h)[0]
+        if hb.startswith(base) or base.startswith(hb) or hb.lstrip("0").startswith(stripped):
+            return h
+
+    return None
+
 # --------------- main flow ----------------
 def main():
     random.seed(1234)
@@ -126,12 +189,15 @@ def main():
     val_lr_files = list_images(VAL_LR_DIR)
     val_hr_files = list_images(VAL_HR_DIR)
 
+    test_lr_files = list_images(TEST_LR_DIR)
+    test_hr_files = list_images(TEST_HR_DIR)
+
     if len(train_lr_files) == 0 or len(train_hr_files) == 0:
         raise SystemExit("Train LR/HR not found. Check data/processed/train/")
     if len(val_lr_files) == 0 or len(val_hr_files) == 0:
         raise SystemExit("Val LR/HR not found. Check data/processed/val/")
 
-    print("Train pairs:", len(train_lr_files), " Val pairs:", len(val_lr_files))
+    print("Train pairs:", len(train_lr_files), " Val:", len(val_lr_files), " Test:", len(test_lr_files))
 
     model = build_residual_srcnn(PATCH)
     model.summary()
@@ -148,25 +214,80 @@ def main():
         validation_steps=VAL_STEPS
     )
 
-    model.save(MODEL_PATH)
-    print("Saved model to", MODEL_PATH)
+    # save model (HDF5 legacy warning is ok)
+    try:
+        model.save(MODEL_PATH)
+        print("Model saved →", MODEL_PATH)
+    except Exception as e:
+        print("Warning: failed to save as HDF5:", e)
+        alt = MODEL_PATH + ".keras"
+        model.save(alt)
+        print("Saved instead to", alt)
 
-    # Run inference on VAL set and save outputs
-    print("Running inference on VAL set and saving outputs to", OUT_DIR)
+    # Run inference on TEST set and save outputs
+    print("Running inference on TEST set and saving outputs...")
     overlap = max(8, PATCH//4)
-    n = min(len(val_lr_files), len(val_hr_files))
-    for i in range(n):
-        lr_path = os.path.join(VAL_LR_DIR, val_lr_files[i])
-        hr_path = os.path.join(VAL_HR_DIR, val_hr_files[i])
-        lr_img = Image.open(lr_path).convert("RGB")
-        hr_img = Image.open(hr_path).convert("RGB")
+
+    if len(test_lr_files) == 0:
+        print("No test LR files found; nothing to do.")
+        return
+
+    # create a quick set of HR filenames for matching
+    hr_set = set(test_hr_files)
+
+    unmatched = []
+    saved_count = 0
+
+    for i, lr_fname in enumerate(test_lr_files):
+        lr_path = os.path.join(TEST_LR_DIR, lr_fname)
+
+        matched_hr = find_matching_hr(lr_fname, test_hr_files)
+        if matched_hr is None:
+            print("NO HR FOUND for LR:", lr_fname)
+            unmatched.append(lr_fname)
+            continue
+
+        hr_path = os.path.join(TEST_HR_DIR, matched_hr)
+
+        # Load images
+        try:
+            lr_img = Image.open(lr_path).convert("RGB")
+        except Exception as e:
+            print("ERROR opening LR:", lr_path, e)
+            unmatched.append(lr_fname)
+            continue
+
+        try:
+            hr_img = Image.open(hr_path).convert("RGB")
+        except Exception as e:
+            print("ERROR opening HR:", hr_path, e)
+            unmatched.append(lr_fname)
+            continue
+
         pred_arr = tile_predict_full(model, lr_img, PATCH, overlap)
-        prefix = f"val_{i+1:03d}"
-        Image.fromarray(np.array(lr_img)).save(os.path.join(OUT_DIR, f"{prefix}_lr.png"))
-        Image.fromarray(pred_arr).save(os.path.join(OUT_DIR, f"{prefix}_pred.png"))
-        hr_img.save(os.path.join(OUT_DIR, f"{prefix}_hr.png"))
-        print("Saved:", prefix)
-    print("All done. Outputs in", OUT_DIR)
+
+        # Use matched_hr base for output prefix if possible, else fallback to test_i
+        base_name = os.path.splitext(matched_hr)[0]
+        safe_base = base_name
+        prefix = f"{safe_base}_pred"
+
+        out_lr_name = f"{safe_base}_lr.png"
+        out_pred_name = f"{safe_base}_pred.png"
+        out_hr_name = f"{safe_base}_hr.png"
+
+        Image.fromarray(np.array(lr_img)).save(os.path.join(OUT_DIR, out_lr_name))
+        Image.fromarray(pred_arr).save(os.path.join(OUT_DIR, out_pred_name))
+        hr_img.save(os.path.join(OUT_DIR, out_hr_name))
+
+        saved_count += 1
+        print(f"Saved: {out_pred_name}  (matched HR: {matched_hr})")
+
+    print(f"Done. Saved {saved_count} predicted images to {OUT_DIR}")
+    if unmatched:
+        print("Unmatched LR files (no HR found):", unmatched)
+        print("Please check your data/processed/test/HR filenames and ensure matching names.")
+    else:
+        print("All test LR files had matching HRs.")
 
 if __name__ == "__main__":
     main()
