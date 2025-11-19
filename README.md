@@ -1,7 +1,6 @@
+📌 Project Title
+
 Image Super-Resolution using SRCNN and Classical Upsampling Methods
-
-
----
 
 📖 Overview
 
@@ -15,7 +14,6 @@ Bilinear
 
 Bicubic
 
-
 🔹 2. Deep Learning Model (Improved SRCNN)
 
 A residual SRCNN model trained using patch-based learning with tile-based inference.
@@ -25,10 +23,6 @@ A residual SRCNN model trained using patch-based learning with tile-based infere
 FSRCNN (Fast Super-Resolution CNN)
 
 EDSR (Enhanced Deep Super-Resolution)
-
-
-
----
 
 🎯 Project Motivation
 
@@ -40,34 +34,23 @@ blurred textures
 
 loss of detail
 
-
 Classical interpolation enlarges an image but cannot restore lost information.
 
 Deep learning models like SRCNN/FSRCNN/EDSR learn how LR and HR relate and can reconstruct realistic textures.
 
 This project builds a complete pipeline:
 
-1. Preprocessing & dataset creation
+Preprocessing & dataset creation
 
+Classical algorithm comparison
 
-2. Classical algorithm comparison
+SRCNN training
 
+Testing & evaluation
 
-3. SRCNN training
-
-
-4. Testing & evaluation
-
-
-5. Comparison with state-of-the-art models
-
-
-
-
----
+Comparison with state-of-the-art models
 
 📂 Project Folder Structure
-
 project/
 │
 ├── data/
@@ -98,24 +81,20 @@ project/
 │
 └── README.md
 
-
----
-
 🗂 Dataset Preparation
 
 Run:
 
 python scripts/preprocess_fixed_first80_81_90.py
 
+
 This script:
 
-1. Reads HR images from data/HR/
+Reads HR images from data/HR/
 
+Creates LR versions using bicubic downsampling
 
-2. Creates LR versions using bicubic downsampling
-
-
-3. Splits into:
+Splits into:
 
 80 train
 
@@ -123,20 +102,14 @@ This script:
 
 10 test
 
-
-
-4. Saves the split summary visualization (split_summary.png)
-
-
-
-
----
+Saves the split summary visualization (split_summary.png)
 
 📈 Classical Upsampling Methods
 
 Script:
 
 python scripts/convert_make_lr_and_upscale_bicubic.py
+
 
 This generates LR → HR outputs using:
 
@@ -158,9 +131,6 @@ outputs/sample/nearest/
 outputs/sample/bilinear/
 outputs/sample/bicubic/
 
-
----
-
 🤖 Deep Learning Model — Residual SRCNN
 
 We implement an improved SRCNN with:
@@ -175,9 +145,7 @@ Adam optimizer, LR = 1e-4
 
 Loss = MSE
 
-
 🔧 Model Architecture
-
 Input (64×64×3)
 │
 ├── Conv2D (64 filters, 9×9, ReLU)
@@ -187,7 +155,6 @@ Input (64×64×3)
 └── Residual Add (input + conv3 output)
 
 🏋️ Training Command
-
 python scripts/_train_srcnn.py
 
 🔍 Output
@@ -195,9 +162,6 @@ python scripts/_train_srcnn.py
 Predicted HR images saved in:
 
 outputs/images/
-
-
----
 
 📊 Evaluation Metrics
 
@@ -217,21 +181,13 @@ Higher (0–1) = more similar structure
 
 Evaluation formulas follow standard methods and compute metrics on Y-channel (brightness) for accuracy.
 
-
----
-
 🧪 Results (Your Actual Project Results)
-
 🔹 Classical vs SRCNN (Average of 5 Test Images)
-
 Method	Avg MSE	Avg PSNR (dB)	Avg SSIM
-
 SRCNN (Your Model)	171.35	26.322	0.7786
 Bicubic	175.13	26.230	0.7722
 Bilinear	200.63	25.631	0.7456
 Nearest	228.90	25.067	0.7381
-
-
 🔹 Interpretation
 
 SRCNN outperforms all classical methods
@@ -240,19 +196,11 @@ Bicubic is best classical
 
 Nearest is worst due to block artifacts
 
-
-
----
-
 🥇 Comparison with Pretrained Models (Benchmark Values)
-
 Model	PSNR	SSIM	Dataset
-
 SRCNN (Ours)	26.32	0.7786	Our test set
 FSRCNN	~27.2	~0.81	Set5
 EDSR	~32.4	~0.90	DIV2K
-
-
 Why include EDSR & FSRCNN?
 
 To show:
@@ -263,30 +211,18 @@ how deep learning evolved from SRCNN
 
 how performance improves with deeper architectures
 
-
-
----
-
 🚀 How to Run the Full Pipeline
-
 1. Preprocess Data
-
 python scripts/preprocess_fixed_first80_81_90.py
 
 2. Generate Classical Upsampled Outputs
-
 python scripts/convert_make_lr_and_upscale_bicubic.py
 
 3. Train SRCNN
-
 python scripts/_train_srcnn.py
 
 4. Evaluate Metrics (optional)
-
 python scripts/evaluate_metrics.py
-
-
----
 
 🔮 Future Improvements
 
@@ -300,10 +236,6 @@ Add real-world degradation models (noise, JPEG artifacts)
 
 Switch to GAN models (SRGAN, ESRGAN)
 
-
-
----
-
 🏁 Conclusion
 
 This project demonstrates:
@@ -313,6 +245,5 @@ How classical interpolation behaves
 How SRCNN improves image quality
 
 How modern deep SR networks outperform classical methods
-
 
 It provides a complete and clear pipeline for learning, training, comparing, and evaluating image super-resolution methods.
