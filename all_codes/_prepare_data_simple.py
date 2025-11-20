@@ -17,6 +17,13 @@ import os
 from PIL import Image
 from shutil import copyfile
 
+# --- NEW: plotting libs for summary ---
+try:
+    import matplotlib.pyplot as plt
+except Exception:
+    plt = None
+# ---------------------------------------
+
 # -------------- SETTINGS --------------
 SCALE = 4                    # downscale factor for LR creation
 TRAIN_END = 80               # first 80 -> train (indices 0..79)
@@ -108,6 +115,81 @@ def fixed_split_copy(hr_files):
         c_lr = count(os.path.join(PROC_FOLDER, s, "LR"))
         print(f"  {s}: HR={c_hr}  LR={c_lr}")
 
+def summarize_splits(proc_folder):
+    """
+    Count images in processed splits and create a small summary plot + CSV.
+    Saves:
+      - data/processed/split_summary.png
+      - data/processed/split_counts.csv
+    """
+    splits = ("train", "val", "test")
+    categories = ["HR", "LR"]
+    counts = {s: {c: 0 for c in categories} for s in splits}
+
+    for s in splits:
+        for c in categories:
+            d = os.path.join(proc_folder, s, c)
+            if os.path.isdir(d):
+                counts[s][c] = len([f for f in os.listdir(d) if f.lower().endswith((".png",".jpg",".jpeg",".bmp",".tiff"))])
+            else:
+                counts[s][c] = 0
+
+    # Print the counts
+    print("\n=== FINAL SPLIT COUNTS ===")
+    total_images = 0
+    for s in splits:
+        hrc = counts[s]["HR"]
+        lrc = counts[s]["LR"]
+        total_images += hrc  # HR count is the authoritative number
+        print(f"  {s}: HR={hrc}  LR={lrc}")
+
+    # Avoid division by zero
+    total = max(1, total_images)
+
+    # Prepare values for plotting: use HR counts as representative
+    values = [counts[s]["HR"] for s in splits]
+    labels = [f"{s} ({v} imgs)" for s, v in zip(splits, values)]
+    percents = [100.0 * v / total for v in values]
+
+    # Save CSV summary
+    csv_path = os.path.join(proc_folder, "split_counts.csv")
+    try:
+        with open(csv_path, "w") as f:
+            f.write("split,HR_count,LR_count,percent_of_total\n")
+            for s, v, p in zip(splits, values, percents):
+                f.write(f"{s},{counts[s]['HR']},{counts[s]['LR']},{p:.2f}\n")
+        print(f"Saved split counts CSV -> {csv_path}")
+    except Exception as e:
+        print("Warning: could not save CSV:", e)
+
+    # Create plot if matplotlib is available
+    out_png = os.path.join(proc_folder, "split_summary.png")
+    if plt is None:
+        print("matplotlib not available — skipping plot generation.")
+        return
+
+    try:
+        fig, ax = plt.subplots(figsize=(6,4))
+        bars = ax.bar(splits, values, color=["#4C72B0","#55A868","#C44E52"])
+        ax.set_title("Dataset split (train / val / test)")
+        ax.set_ylabel("Number of HR images")
+        for bar, v in zip(bars, values):
+            ax.text(bar.get_x() + bar.get_width()/2.0, v + max(1, total*0.01), str(v), ha='center', va='bottom')
+
+        # add a small pie chart inset showing percentages
+        from matplotlib.transforms import Bbox
+        left, bottom, width, height = 0.65, 0.55, 0.3, 0.35
+        ax2 = fig.add_axes([left, bottom, width, height])
+        ax2.pie(values, labels=[f"{p:.1f}%" for p in percents], colors=["#4C72B0","#55A868","#C44E52"], autopct=None, startangle=90)
+        ax2.set_title("Percent")
+
+        plt.tight_layout()
+        plt.savefig(out_png, dpi=150)
+        plt.close(fig)
+        print(f"Saved split summary plot -> {out_png}")
+    except Exception as e:
+        print("Warning: failed to create plot:", e)
+
 def main():
     make_dirs()
 
@@ -121,12 +203,16 @@ def main():
     # copy into fixed splits using HR list order
     fixed_split_copy(hr_files)
 
+    # --- NEW: summarize + plot the resulting splits ---
+    summarize_splits(PROC_FOLDER)
+
     print("\nDone.")
     print("Check these folders:")
     print(" - intermediate LR:", LR_FOLDER)
     print(" - processed/train/HR and processed/train/LR")
     print(" - processed/val/HR and processed/val/LR")
     print(" - processed/test/HR and processed/test/LR")
+    print(" - split summary (png/csv):", os.path.join(PROC_FOLDER, "split_summary.png"), os.path.join(PROC_FOLDER, "split_counts.csv"))
 
 if __name__ == "__main__":
     main()

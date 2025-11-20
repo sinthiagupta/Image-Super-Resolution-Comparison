@@ -1,0 +1,4 @@
+split,HR_count,LR_count,percent_of_total
+train,80,80,80.00
+val,10,10,10.00
+test,10,10,10.00
